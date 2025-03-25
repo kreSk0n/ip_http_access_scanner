@@ -1,3 +1,5 @@
+This script useful for bypassing WAFs/CDNs , identifying misconfigurations , discovering exposed services. 
+
 - Resolves domains to IP addresses
 - Scans each IP for direct HTTP/HTTPS access on common ports
 - Sends the request with the correct HOST Header
