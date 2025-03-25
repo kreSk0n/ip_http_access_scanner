@@ -3,7 +3,7 @@
 - Sends the request with the correct HOST Header
 - Supports custom DNS resolvers 
 
-***Running script:
-chmod +x ip_http_scanner
-sudo cp ip_http_scanner /usr/local/bin
-./ip_http_scanner -r resolvers.txt targets.txt
+Running script:
+- chmod +x ip_http_scanner
+- sudo cp ip_http_scanner /usr/local/bin
+- ./ip_http_scanner -r resolvers.txt targets.txt
