@@ -1,0 +1,107 @@
+#!/bin/bash
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[1;34m'
+NC='\033[0m'
+
+ports=(80 8080 8000 443 8443)
+protocols=(http https)
+
+RESOLVERS=""
+INPUT=""
+TMP_TASKS=$(mktemp)
+TMP_RESULTS=$(mktemp)
+
+# Parse args
+while [[ "$#" -gt 0 ]]; do
+case $1 in
+-r|--resolvers) RESOLVERS="$2"; shift ;;
+*) INPUT="$1" ;;
+esac
+shift
+done
+
+if [ -z "$INPUT" ]; then
+echo -e "${YELLOW}Usage:${NC} $0 [-r resolvers.txt or 1.1.1.1,8.8.8.8] subdomains.txt"
+exit 1
+fi
+
+# Build dig resolvers
+DIG_RESOLVERS=()
+if [ -n "$RESOLVERS" ]; then
+if [[ -f "$RESOLVERS" ]]; then
+while read -r r; do
+[[ -n "$r" ]] && DIG_RESOLVERS+=("@$r")
+done < "$RESOLVERS"
+else
+IFS=',' read -ra RES <<< "$RESOLVERS"
+for r in "${RES[@]}"; do
+DIG_RESOLVERS+=("@$r")
+done
+fi
+fi
+
+declare -A seen_ips
+
+# Build scan tasks: url ip domain
+while read -r domain; do
+ip=$(dig "${DIG_RESOLVERS[@]}" +short "$domain" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n 1)
+if [ -z "$ip" ]; then
+echo -e "${RED}[!] Failed to resolve $domain${NC}"
+continue
+fi
+
+echo -e "${BLUE}[*] $domain -> $ip${NC}"
+
+if [[ ${seen_ips["$ip"]} ]]; then
+echo -e "${YELLOW}[!] IP $ip already scanned, skipping.${NC}"
+continue
+fi
+seen_ips["$ip"]=1
+
+for proto in "${protocols[@]}"; do
+for port in "${ports[@]}"; do
+echo "$proto://$ip:$port $ip $domain" >> "$TMP_TASKS"
+done
+done
+done < "$INPUT"
+
+# Scan function
+scan_target() {
+url=$1
+ip=$2
+domain=$3
+
+code=$(curl -sk --connect-timeout 3 -m 6 -H "Host: $domain" -o /dev/null -w "%{http_code}" "$url")
+
+if [ "$code" == "200" ]; then
+echo -e "${GREEN}[+] $url [200 OK] -> $domain${NC}"
+echo "$url [200 OK] -> $domain" >> "$TMP_RESULTS"
+elif [[ "$code" =~ ^[0-9]{3}$ ]]; then
+echo -e "${YELLOW}[-] $url [$code]${NC}"
+else
+echo -e "${RED}[!] No response from $url${NC}"
+fi
+}
+
+export -f scan_target
+export RED GREEN YELLOW NC TMP_RESULTS
+
+# Parallel scan
+cat "$TMP_TASKS" | xargs -P 10 -n 3 bash -c 'scan_target "$0" "$1" "$2"'
+
+# Final summary
+if [[ -s "$TMP_RESULTS" ]]; then
+echo -e "\n${BLUE}==== Summary of Positive Results ====${NC}"
+while read -r line; do
+echo -e "${GREEN}$line${NC}"
+done < "$TMP_RESULTS"
+else
+echo -e "\n${RED}[!] No 200 OK responses found.${NC}"
+fi
+
+# Clean up
+rm "$TMP_TASKS" "$TMP_RESULTS"
